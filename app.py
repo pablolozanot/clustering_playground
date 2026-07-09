@@ -1,7 +1,9 @@
 import pickle
+from datetime import date
 
 import numpy as np
 import pandas as pd
+import plotly.express as px
 import streamlit as st
 from huggingface_hub import hf_hub_download
 from sentence_transformers import SentenceTransformer
@@ -9,6 +11,7 @@ from sentence_transformers import SentenceTransformer
 from src.retrieval import build_faiss_index, investigate_case
 
 REPO_ID = "pablolozanot/clustering_demo"
+TIME_WINDOW_DAYS = 60
 
 EXAMPLE_TEMPLATE = (
     "I am writing to dispute inaccurate information in my credit file. "
@@ -49,6 +52,40 @@ def load_everything():
     return df, model, index
 
 
+def build_chart(matches, threshold, query_date=None):
+    plot_df = matches.copy()
+    plot_df["Company short"] = plot_df["Company"].str[:30]
+    plot_df["snippet"] = plot_df["Consumer complaint narrative"].str[:120] + "..."
+
+    fig = px.scatter(
+        plot_df,
+        x="Date received",
+        y="similarity",
+        color="Company short",
+        hover_data={"Company short": False, "Company": True, "snippet": True, "similarity": ":.3f"},
+        labels={"Date received": "Date filed", "similarity": "Similarity score", "Company short": "Company"},
+        title="Where in time do the matching complaints land?",
+    )
+    fig.update_traces(marker=dict(size=10, line=dict(width=0.5, color="white")))
+    fig.add_hline(
+        y=threshold, line_dash="dash", line_color="#ef4444",
+        annotation_text=f"threshold ({threshold})", annotation_position="bottom right",
+    )
+
+    if query_date is not None:
+        qd = pd.Timestamp(query_date)
+        fig.add_vrect(
+            x0=qd - pd.Timedelta(days=TIME_WINDOW_DAYS),
+            x1=qd + pd.Timedelta(days=TIME_WINDOW_DAYS),
+            fillcolor="#fbbf24", opacity=0.12, line_width=0,
+        )
+        fig.add_vline(x=qd, line_dash="dot", line_color="#f59e0b",
+                      annotation_text="query date", annotation_position="top")
+
+    fig.update_layout(height=380, legend_title_text="Company", margin=dict(t=50, b=20))
+    return fig
+
+
 def main():
     st.set_page_config(page_title="CFPB Complaint Pattern Finder", layout="wide")
 
@@ -56,7 +93,7 @@ def main():
     st.markdown(
         "Paste a consumer complaint narrative and the tool searches **207,000 real CFPB complaints** "
         "for near-identical text. It tells you whether the complaint looks like a known filing template "
-        "reused by many people, or a unique personal account."
+        "reused by many people, or a unique personal account — and shows *when* those matches were filed."
     )
 
     df, model, index = load_everything()
@@ -71,6 +108,15 @@ def main():
             st.session_state.input_text = EXAMPLE_PERSONAL
 
         st.divider()
+        st.markdown("**Date of this complaint** *(optional)*")
+        use_date = st.checkbox("Add a filing date", value=False)
+        query_date = st.date_input(
+            "Filing date", value=date(2021, 6, 1),
+            min_value=date(2019, 1, 1), max_value=date(2022, 12, 31),
+            disabled=not use_date, label_visibility="collapsed",
+        ) if use_date else None
+
+        st.divider()
         st.markdown("**Settings**")
         threshold = st.slider("Similarity threshold", 0.70, 0.99, 0.85, 0.01,
                               help="Minimum cosine similarity to count as a near-duplicate")
@@ -82,7 +128,7 @@ def main():
         text = st.text_area(
             "Complaint narrative",
             key="input_text",
-            height=220,
+            height=200,
             placeholder="Paste a CFPB consumer complaint narrative here...",
         )
 
@@ -93,7 +139,22 @@ def main():
                     k=k, threshold=threshold, min_matches=min_matches,
                 )
 
+            matches = result["matches"].copy()
             n_q = result["n_qualifying_matches"]
+
+            # Temporal metrics (only when a query date is provided)
+            if query_date is not None:
+                qd = pd.Timestamp(query_date)
+                in_window = (
+                    (matches["Date received"] >= qd - pd.Timedelta(days=TIME_WINDOW_DAYS)) &
+                    (matches["Date received"] <= qd + pd.Timedelta(days=TIME_WINDOW_DAYS))
+                )
+                n_window = int(in_window.sum())
+                n_window_qualifying = int(
+                    ((matches["similarity"] >= threshold) & in_window).sum()
+                )
+
+            # Verdict banner
             if result["verdict"] == "finding":
                 st.success(
                     f"FINDING — {n_q} near-identical complaints (≥ {threshold} similarity, "
@@ -105,14 +166,26 @@ def main():
                     f"found (needed {min_matches}+ for a finding)"
                 )
 
-            matches = result["matches"].copy()
+            # Temporal summary metrics
+            if query_date is not None:
+                m1, m2, m3 = st.columns(3)
+                m1.metric("Matches retrieved", len(matches))
+                m2.metric(f"Within ±{TIME_WINDOW_DAYS}d of query date", n_window)
+                m3.metric(f"Qualifying & within window", n_window_qualifying,
+                          delta="temporal cluster" if n_window_qualifying >= min_matches else "no temporal cluster",
+                          delta_color="inverse" if n_window_qualifying < min_matches else "normal")
+
+            # Chart
+            st.plotly_chart(build_chart(matches, threshold, query_date), use_container_width=True)
+
+            # Detail table
             matches["Date received"] = matches["Date received"].dt.date
             matches["similarity"] = matches["similarity"].round(3)
             matches["snippet"] = matches["Consumer complaint narrative"].str[:150] + "..."
-
             show_cols = [c for c in ["similarity", "Date received", "Company", "Product", "snippet"]
                          if c in matches.columns]
-            st.dataframe(matches[show_cols], use_container_width=True, hide_index=True)
+            with st.expander("Show all matches", expanded=False):
+                st.dataframe(matches[show_cols], use_container_width=True, hide_index=True)
 
     st.divider()
     st.caption(
