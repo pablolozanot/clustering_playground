@@ -30,6 +30,19 @@ EXAMPLE_PERSONAL = (
     "I need these charges reversed and a written explanation of what happened to my account."
 )
 
+# Real cluster from the data: 58 near-identical complaints against 36 companies, all in a 16-day window.
+# One consumer disputing fraudulent accounts on their credit report, filing against every creditor involved.
+EXAMPLE_TEMPORAL_NARRATIVE = (
+    "I've been disputing fraud accounts on my credit report since XX/XX/2020. "
+    "I keep sending multiple sets of letters to the bureaus and the creditors so the excuse of "
+    "\"we didn't get it\" doesn't happen. Furthermore, each letter is certified mail with tracking "
+    "and each letter shows signed and delivered and yet the bureaus are still not taking any actions. "
+    "The accounts are not showing in dispute nor are they removed from my report. "
+    "The accounts always show up with different name variations and different account number variations "
+    "and yet the bureaus seem to ignore the trend and let these fraud accounts affect my credit score."
+)
+EXAMPLE_TEMPORAL_DATE = date(2021, 7, 7)
+
 HOW_IT_WORKS = """
 **The dataset**
 
@@ -91,8 +104,12 @@ Through clustering the full corpus, three distinct filing patterns emerged:
 
 @st.cache_resource(show_spinner="Loading 207k complaints and building search index (first load ~1 min)...")
 def load_everything():
-    parquet_path = hf_hub_download(repo_id=REPO_ID, filename="complaints_500k_narrative.parquet")
-    emb_path = hf_hub_download(repo_id=REPO_ID, filename="complaints_500k_narrative_embeddings.pkl")
+    try:
+        parquet_path = hf_hub_download(repo_id=REPO_ID, filename="complaints_500k_narrative.parquet")
+        emb_path = hf_hub_download(repo_id=REPO_ID, filename="complaints_500k_narrative_embeddings.pkl")
+    except Exception as e:
+        st.error(f"Could not download data from HuggingFace Hub: {e}")
+        st.stop()
 
     df = pd.read_parquet(parquet_path)
     df["Date received"] = pd.to_datetime(df["Date received"])
@@ -285,6 +302,12 @@ def tab_temporal(df, model, index):
     left, right = st.columns([3, 1])
 
     with right:
+        st.markdown("**Try an example**")
+        if st.button("Coordinated credit dispute", use_container_width=True, key="ex3"):
+            st.session_state.tmp_text = EXAMPLE_TEMPORAL_NARRATIVE
+            st.session_state.tmp_date = EXAMPLE_TEMPORAL_DATE
+
+        st.divider()
         st.markdown("**Query date** *(required)*")
         query_date = st.date_input("Date to investigate", value=date(2021, 6, 1),
                                    min_value=date(2019, 1, 1), max_value=date(2022, 12, 31),

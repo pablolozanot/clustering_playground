@@ -130,7 +130,7 @@ def score_candidates(components, df, embeddings, index, embeddings_norm, text_th
     return pd.DataFrame(rows).sort_values("candidate_score", ascending=False).reset_index(drop=True)
 
 
-def report(result, text_col="Consumer complaint narrative", n_show=5):
+def report(result, n_show=5):
     print(f"Verdict: {result['verdict'].upper()}")
     print(f"Qualifying matches (>= {result['threshold']}): {result['n_qualifying_matches']} "
           f"(need {result['min_matches']}+ for a finding)")
