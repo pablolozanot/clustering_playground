@@ -1,6 +1,6 @@
 # clustering_playground
 
-I got curious about what happens when you treat consumer complaints like text data and let the math find the patterns.
+I use customers complaints data to test some of the ideas we need to implement on sensitive data at work.
 
 The dataset is the [CFPB Consumer Complaint Database](https://www.consumerfinance.gov/data-research/consumer-complaints/) — about 15 million complaints filed against banks, credit bureaus, and debt collectors, all public. I took a slice of 207,000 complaints from 2019–2022 that have written narratives (most don't) and embedded them with a sentence transformer. Then built a search and clustering layer on top.
 
